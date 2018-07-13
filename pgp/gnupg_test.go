@@ -2,6 +2,7 @@ package pgp
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 
@@ -26,7 +27,7 @@ func (s *GnupgSuite) TestGPG1(c *C) {
 	os.Setenv("PATH", filepath.Join(s.bins, "gpg1"))
 	defer func() { os.Setenv("PATH", origPath) }()
 
-	signer := NewGpgSigner()
+	signer := NewGpgSigner(GPG1Finder())
 	c.Assert(signer.gpg, Equals, "gpg")
 }
 
@@ -36,7 +37,7 @@ func (s *GnupgSuite) TestGPG1Not2(c *C) {
 	os.Setenv("PATH", filepath.Join(s.bins, "gpg2-and-1"))
 	defer func() { os.Setenv("PATH", origPath) }()
 
-	signer := NewGpgSigner()
+	signer := NewGpgSigner(GPG1Finder())
 	c.Assert(signer.gpg, Equals, "gpg1")
 }
 
@@ -46,7 +47,7 @@ func (s *GnupgSuite) TestGPGNothing(c *C) {
 	os.Setenv("PATH", filepath.Join(s.bins, "gpg2-only"))
 	defer func() { os.Setenv("PATH", origPath) }()
 
-	c.Assert(func() { NewGpgSigner() }, PanicMatches, `Couldn't find a suitable gpg executable.+`)
+	c.Assert(func() { NewGpgSigner(GPG1Finder()) }, PanicMatches, `Couldn't find a suitable gpg executable.+`)
 }
 
 // If gpgv == gpgv1 = pick gpgv
@@ -55,7 +56,7 @@ func (s *GnupgSuite) TestGPGV1(c *C) {
 	os.Setenv("PATH", filepath.Join(s.bins, "gpgv1")+":"+filepath.Join(s.bins, "gpg1"))
 	defer func() { os.Setenv("PATH", origPath) }()
 
-	verifier := NewGpgVerifier()
+	verifier := NewGpgVerifier(GPG1Finder())
 	c.Assert(verifier.gpgv, Equals, "gpgv")
 }
 
@@ -65,7 +66,7 @@ func (s *GnupgSuite) TestGPGV1Not2(c *C) {
 	os.Setenv("PATH", filepath.Join(s.bins, "gpgv2-and-1")+":"+filepath.Join(s.bins, "gpg1"))
 	defer func() { os.Setenv("PATH", origPath) }()
 
-	verifier := NewGpgVerifier()
+	verifier := NewGpgVerifier(GPG1Finder())
 	c.Assert(verifier.gpgv, Equals, "gpgv1")
 }
 
@@ -75,7 +76,7 @@ func (s *GnupgSuite) TestGPGVNothing(c *C) {
 	os.Setenv("PATH", filepath.Join(s.bins, "gpgv2-only")+":"+filepath.Join(s.bins, "gpg1"))
 	defer func() { os.Setenv("PATH", origPath) }()
 
-	c.Assert(func() { NewGpgVerifier() }, PanicMatches, `Couldn't find a suitable gpgv executable.+`)
+	c.Assert(func() { NewGpgVerifier(GPG1Finder()) }, PanicMatches, `Couldn't find a suitable gpg executable.+`)
 }
 
 type Gnupg1VerifierSuite struct {
@@ -85,7 +86,13 @@ type Gnupg1VerifierSuite struct {
 var _ = Suite(&Gnupg1VerifierSuite{})
 
 func (s *Gnupg1VerifierSuite) SetUpTest(c *C) {
-	s.verifier = NewGpgVerifier()
+	finder := GPG1Finder()
+	_, _, err := finder.FindGPG()
+	if err != nil {
+		c.Skip(err.Error())
+	}
+
+	s.verifier = NewGpgVerifier(finder)
 	s.verifier.AddKeyring("./trusted.gpg")
 
 	c.Assert(s.verifier.InitKeyring(), IsNil)
@@ -98,7 +105,18 @@ type Gnupg1SignerSuite struct {
 var _ = Suite(&Gnupg1SignerSuite{})
 
 func (s *Gnupg1SignerSuite) SetUpTest(c *C) {
-	s.signer = NewGpgSigner()
+	finder := GPG1Finder()
+	_, _, err := finder.FindGPG()
+	if err != nil {
+		c.Skip(err.Error())
+	}
+
+	s.keyringNoPassphrase = [2]string{"keyrings/aptly.pub", "keyrings/aptly.sec"}
+	s.keyringPassphrase = [2]string{"keyrings/aptly_passphrase.pub", "keyrings/aptly_passphrase.sec"}
+	s.passphraseKey = "F30E8CB9CDDE2AF8"
+	s.noPassphraseKey = "21DBB89C16DB3E6D"
+
+	s.signer = NewGpgSigner(finder)
 	s.signer.SetBatch(true)
 
 	s.verifier = &GoVerifier{}
@@ -108,4 +126,64 @@ func (s *Gnupg1SignerSuite) SetUpTest(c *C) {
 	c.Assert(s.verifier.InitKeyring(), IsNil)
 
 	s.SignerSuite.SetUpTest(c)
+}
+
+type Gnupg2VerifierSuite struct {
+	VerifierSuite
+}
+
+var _ = Suite(&Gnupg2VerifierSuite{})
+
+func (s *Gnupg2VerifierSuite) SetUpTest(c *C) {
+	finder := GPG2Finder()
+	_, _, err := finder.FindGPG()
+	if err != nil {
+		c.Skip(err.Error())
+	}
+
+	s.verifier = NewGpgVerifier(finder)
+	s.verifier.AddKeyring("./trusted.gpg")
+
+	c.Assert(s.verifier.InitKeyring(), IsNil)
+}
+
+type Gnupg2SignerSuite struct {
+	SignerSuite
+}
+
+var _ = Suite(&Gnupg2SignerSuite{})
+
+func (s *Gnupg2SignerSuite) SetUpTest(c *C) {
+	finder := GPG2Finder()
+	gpg, _, err := finder.FindGPG()
+	if err != nil {
+		c.Skip(err.Error())
+	}
+
+	output, err := exec.Command(gpg, "--import", "keyrings/aptly2.sec.armor").CombinedOutput()
+	c.Log(string(output))
+	c.Check(err, IsNil)
+
+	output, err = exec.Command(gpg, "--import", "--passphrase", "verysecret", "--no-tty", "--batch", "--pinentry-mode", "loopback", "keyrings/aptly2_passphrase.sec.armor").CombinedOutput()
+	c.Log(string(output))
+	c.Check(err, IsNil)
+
+	s.keyringNoPassphrase = [2]string{"keyrings/aptly2.gpg", ""}
+	s.keyringPassphrase = [2]string{"keyrings/aptly2_passphrase.gpg", ""}
+	s.noPassphraseKey = "751DF85C2B220D45"
+	s.passphraseKey = "6656CD181E92D2D5"
+
+	s.signer = NewGpgSigner(finder)
+	s.signer.SetBatch(true)
+
+	s.verifier = &GoVerifier{}
+	s.verifier.AddKeyring("./keyrings/aptly2_trusted.pub")
+
+	c.Assert(s.verifier.InitKeyring(), IsNil)
+
+	s.SignerSuite.SetUpTest(c)
+}
+
+func (s *Gnupg2SignerSuite) TearDownTest(c *C) {
+	s.SignerSuite.TearDownTest(c)
 }
