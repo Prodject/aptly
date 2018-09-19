@@ -11,6 +11,7 @@ addons:
     - python-virtualenv
     - graphviz
     - gnupg2
+    - gpgv2
 
 env:
   global:
