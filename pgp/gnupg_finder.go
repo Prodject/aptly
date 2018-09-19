@@ -3,6 +3,7 @@ package pgp
 import (
 	"errors"
 	"os/exec"
+	"regexp"
 	"strings"
 )
 
@@ -10,9 +11,16 @@ import (
 var skipGPGVersionCheck bool
 
 // GPGVersion stores discovered GPG version
-//
-// 1 for 1.x, and 2 for 2.x
 type GPGVersion int
+
+// GPG version as discovered
+const (
+	GPG1x      GPGVersion = 1
+	GPG20x     GPGVersion = 2
+	GPG21xPlus GPGVersion = 3
+)
+
+var gpgVersionRegex = regexp.MustCompile("\\(GnuPG\\) (\\d)\\.(\\d)")
 
 // GPGFinder implement search for gpg executables and returns version of discovered executables
 type GPGFinder interface {
@@ -27,7 +35,6 @@ type pathGPGFinder struct {
 	errorMessage string
 
 	expectedVersionSubstring string
-	version                  GPGVersion
 }
 
 type iteratingGPGFinder struct {
@@ -50,7 +57,6 @@ func GPG1Finder() GPGFinder {
 		gpgvNames:                []string{"gpgv", "gpgv1"},
 		expectedVersionSubstring: "(GnuPG) 1.",
 		errorMessage:             "Couldn't find a suitable gpg executable. Make sure gnupg1 is available as either gpg(v) or gpg(v)1 in $PATH",
-		version:                  1,
 	}
 }
 
@@ -61,19 +67,18 @@ func GPG2Finder() GPGFinder {
 		gpgvNames:                []string{"gpgv", "gpgv2"},
 		expectedVersionSubstring: "(GnuPG) 2.",
 		errorMessage:             "Couldn't find a suitable gpg executable. Make sure gnupg2 is available as either gpg(v) or gpg(v)2 in $PATH",
-		version:                  2,
 	}
 }
 
 func (pgf *pathGPGFinder) FindGPG() (gpg string, version GPGVersion, err error) {
 	for _, cmd := range pgf.gpgNames {
-		if cliVersionCheck(cmd, pgf.expectedVersionSubstring) {
+		var result bool
+		result, version = cliVersionCheck(cmd, pgf.expectedVersionSubstring)
+		if result {
 			gpg = cmd
 			break
 		}
 	}
-
-	version = pgf.version
 
 	if gpg == "" {
 		err = errors.New(pgf.errorMessage)
@@ -84,13 +89,13 @@ func (pgf *pathGPGFinder) FindGPG() (gpg string, version GPGVersion, err error) 
 
 func (pgf *pathGPGFinder) FindGPGV() (gpgv string, version GPGVersion, err error) {
 	for _, cmd := range pgf.gpgvNames {
-		if cliVersionCheck(cmd, pgf.expectedVersionSubstring) {
+		var result bool
+		result, version = cliVersionCheck(cmd, pgf.expectedVersionSubstring)
+		if result {
 			gpgv = cmd
 			break
 		}
 	}
-
-	version = pgf.version
 
 	if gpgv == "" {
 		err = errors.New(pgf.errorMessage)
@@ -125,10 +130,24 @@ func (it *iteratingGPGFinder) FindGPGV() (gpg string, version GPGVersion, err er
 	return
 }
 
-func cliVersionCheck(cmd string, marker string) bool {
+func cliVersionCheck(cmd string, marker string) (result bool, version GPGVersion) {
 	output, err := exec.Command(cmd, "--version").CombinedOutput()
 	if err != nil {
-		return false
+		return
 	}
-	return strings.Contains(string(output), marker)
+
+	strOutput := string(output)
+	result = strings.Contains(strOutput, marker)
+
+	version = GPG21xPlus
+	matches := gpgVersionRegex.FindStringSubmatch(strOutput)
+	if matches != nil {
+		if matches[1] == "1" {
+			version = GPG1x
+		} else if matches[1] == "2" && matches[2] == "0" {
+			version = GPG20x
+		}
+	}
+
+	return
 }

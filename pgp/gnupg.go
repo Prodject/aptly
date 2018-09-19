@@ -54,7 +54,7 @@ func (g *GpgSigner) gpgArgs() []string {
 	if g.keyring != "" {
 		args = append(args, "--no-auto-check-trustdb", "--no-default-keyring", "--keyring", g.keyring)
 	}
-	if g.secretKeyring != "" && g.version == 1 {
+	if g.secretKeyring != "" && g.version == GPG1x {
 		args = append(args, "--secret-keyring", g.secretKeyring)
 	}
 
@@ -63,7 +63,7 @@ func (g *GpgSigner) gpgArgs() []string {
 	}
 
 	if g.passphrase != "" || g.passphraseFile != "" {
-		if g.version == 1 {
+		if g.version == GPG1x {
 			args = append(args, "--no-use-agent")
 		}
 	}
@@ -78,7 +78,7 @@ func (g *GpgSigner) gpgArgs() []string {
 
 	if g.batch {
 		args = append(args, "--no-tty", "--batch")
-		if g.version == 2 {
+		if g.version == GPG21xPlus {
 			args = append(args, "--pinentry-mode", "loopback")
 		}
 	}

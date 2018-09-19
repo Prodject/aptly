@@ -155,7 +155,7 @@ var _ = Suite(&Gnupg2SignerSuite{})
 
 func (s *Gnupg2SignerSuite) SetUpTest(c *C) {
 	finder := GPG2Finder()
-	gpg, _, err := finder.FindGPG()
+	gpg, ver, err := finder.FindGPG()
 	if err != nil {
 		c.Skip(err.Error())
 	}
@@ -164,7 +164,13 @@ func (s *Gnupg2SignerSuite) SetUpTest(c *C) {
 	c.Log(string(output))
 	c.Check(err, IsNil)
 
-	output, err = exec.Command(gpg, "--import", "--passphrase", "verysecret", "--no-tty", "--batch", "--pinentry-mode", "loopback", "keyrings/aptly2_passphrase.sec.armor").CombinedOutput()
+	args := []string{"--import", "--passphrase", "verysecret", "--no-tty", "--batch"}
+	if ver == GPG21xPlus {
+		args = append(args, "--pinentry-mode", "loopback")
+	}
+	args = append(args, "keyrings/aptly2_passphrase.sec.armor")
+
+	output, err = exec.Command(gpg, args...).CombinedOutput()
 	c.Log(string(output))
 	c.Check(err, IsNil)
 
